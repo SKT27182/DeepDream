@@ -1,3 +1,5 @@
+import base64
+from io import BytesIO
 import torch
 import torch.nn as nn
 from collections import OrderedDict
@@ -8,7 +10,7 @@ from logging import Logger
 from typing import List, Optional, Dict, Callable, Literal, Union, Tuple, Any
 from copy import deepcopy
 
-from IPython.display import clear_output, display
+from IPython.display import clear_output, display, HTML
 from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
@@ -37,6 +39,7 @@ COLOUR_MAPPING = {
 
 
 ############################################# Logger #######################################
+
 
 def add_logging_level(
     level_name: str, level_num: int, method_name: Optional[str] = None
@@ -154,7 +157,6 @@ def create_logger(
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-
     # Remove existing handlers
     if logger.hasHandlers():
         logger.handlers.clear()
@@ -169,6 +171,7 @@ def create_logger(
 
 
 logger = create_logger(__name__, level="info")
+
 
 def close_all_hooks(model: nn.Module):
     for module in model.children():
@@ -230,6 +233,7 @@ def normalize_img(img: torch.Tensor) -> torch.Tensor:
     """
     return 2 * (img.float() / 255.0) - 1.0
 
+
 def denormalize_img(img: torch.Tensor) -> torch.Tensor:
     """
     Normalize an image tensor.
@@ -285,6 +289,120 @@ def is_jupyter_notebook() -> bool:
     else:
         logger.debug("Not running in a Jupyter notebook.")
     return is_jupyter
+
+
+class HTMLImageDisplayer:
+    """A class to display images in a Jupyter notebook using HTML."""
+
+    def __init__(self):
+        self.html = ""
+
+    def _convert_img(
+        self, img: Union[np.ndarray, Image.Image, torch.Tensor]
+    ) -> Image.Image:
+        """Convert an image tensor to a PIL image.
+
+        Parameters
+        ----------
+        img : torch.Tensor
+            Tensor representation of the image of shape (1, C, H, W).
+
+        Returns
+        -------
+        Image.Image
+            PIL image.
+        """
+
+        logger.debug(f"Converting image to PIL image.")
+
+        if isinstance(img, (torch.Tensor, np.ndarray)):
+
+            logger.debug(f"Img shape in tensor: {img.shape}")
+
+            if isinstance(img, torch.Tensor):
+                img = denormalize_img(img)
+                logger.debug(f"Img shape in tensor after denormalize: {img.shape}")
+
+            if len(img.shape) == 4:
+
+                img = img.squeeze().detach().cpu().numpy()
+
+                img = np.transpose(img, (1, 2, 0))
+
+        if isinstance(img, Image.Image):
+            img = np.array(img)
+
+        return Image.fromarray(img)
+
+    def _single_img_to_html(
+        self,
+        html: str,
+        img: Union[np.ndarray, Image.Image, torch.Tensor],
+        title: str,
+        height=400,
+        width=400,
+    ) -> str:
+
+        img = self._convert_img(img)
+
+        # BytesIO object to display image in Jupyter notebook
+        img_io = BytesIO()
+        img.save(img_io, "PNG")
+        img_io.seek(0)
+        img_ = base64.b64encode(img_io.getvalue()).decode()
+
+        html += f"""
+            <div style="text-align:center; width:{width}px; margin-bottom: 20px;">
+                <h3 style="margin-bottom: 5px;">{title}</h3>
+                <img src="data:image/png;base64,{img_}" height={height} width={width}>
+            </div>
+        """
+
+        return html
+
+    def update_image(
+        self,
+        images: Union[List[torch.Tensor], torch.Tensor],
+        base_title: str = "",
+        height=400,
+        width=400,
+    ) -> None:
+        """Display multiple image tensors.
+
+        Parameters
+        ----------
+        images : Union[List[np.ndarray, Image.Image, torch.Tensor], str]
+            List of tensor representations of the images of shape (1, C, H, W).
+        """
+
+        if isinstance(images, torch.Tensor):
+            images = [images]
+
+        for i, img in enumerate(images):
+
+            logger.debug(f"Img shape: {img.shape}")
+            title = f"{base_title}: {i}"
+            self.html += self._single_img_to_html(self.html, img, title, height, width)
+            self.html += f"<br><br>"
+
+        if is_jupyter_notebook():
+            display(HTML(self.html))
+
+    def clear(self) -> None:
+        """Clear the displayed images."""
+        self.html = ""
+        clear_output(wait=True)
+
+    def save(self, file_path: str) -> None:
+        """Save the displayed images to a file.
+
+        Parameters
+        ----------
+        file_path : str
+            Path to save the file.
+        """
+        with open(file_path, "w") as f:
+            f.write(self.html)
 
 
 class ImagePlotter:
@@ -345,7 +463,7 @@ class ImagePlotter:
         # display the figure if running in a Jupyter notebook
         if is_jupyter_notebook():
             # clear_output(wait=True)
-            display(self.fig, clear=True);
+            display(self.fig, clear=True)
         if path_to_save is not None:
             self.fig.savefig(path_to_save)
 

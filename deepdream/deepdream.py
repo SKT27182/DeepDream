@@ -13,9 +13,9 @@ from tqdm.notebook import tqdm
 
 from collections import OrderedDict
 
-from .helper_function.utils import ImagePlotter, create_logger, close_all_hooks, display_img, create_wandb_logger
+from .helper_function.utils import HTMLImageDisplayer, ImagePlotter, create_logger, close_all_hooks, display_img, create_wandb_logger
 
-logger = create_logger(__name__)
+logger = create_logger(__name__, 'info')
 
 
 def total_variation_loss(img, weight=0.1):
@@ -160,7 +160,7 @@ class DeepDream:
 
     def deep_dream(self, iterations=20, lr=0.01):
 
-        image_displayer = ImagePlotter(figsize=(8, 8))
+        image_displayer = HTMLImageDisplayer()
 
         # self.optimizer = optim.Adam([self.img], lr=lr)
         self.optimizer = optim.SGD([self.img], lr=lr)
@@ -195,7 +195,10 @@ class DeepDream:
             self.layer_hook.losses = 0
 
             if i % 5 == 0:
-                image_displayer.update_image(self.img, title=f"Iteration: {i}")
+                image_displayer.clear()
+                logger.debug(f"Img shape: {self.img.shape}")
+                image_displayer.update_image(self.img, base_title = f"Iteration: {i}")
+
 
         return self.img
 
