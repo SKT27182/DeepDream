@@ -252,9 +252,9 @@ class DeepDream:
 
             # clamp the pixel values between -1 and 1
             self.img.data = torch.clamp(self.img.data, -1, 1)
-            self.img = self.img.detach()  # Detach to free the graph
-            self.img.requires_grad = True  # Re-enable gradients
-            # self.img.grad.data.zero_()
+            # self.img = self.img.detach()  # Detach to free the graph
+            # self.img.requires_grad = True  # Re-enable gradients
+            self.img.grad.data.zero_()
 
             self.objective.losses = 0
 
