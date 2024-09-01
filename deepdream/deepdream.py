@@ -13,9 +13,16 @@ from tqdm.notebook import tqdm
 
 from collections import OrderedDict
 
-from .helper_function.utils import HTMLImageDisplayer, ImagePlotter, create_logger, close_all_hooks, display_img, create_wandb_logger
+from .helper_function.utils import (
+    HTMLImageDisplayer,
+    ImagePlotter,
+    create_logger,
+    close_all_hooks,
+    display_img,
+    create_wandb_logger,
+)
 
-logger = create_logger(__name__, 'info')
+logger = create_logger(__name__, "info")
 
 
 def total_variation_loss(img, weight=0.1):
@@ -26,6 +33,25 @@ def total_variation_loss(img, weight=0.1):
 
 
 class ObjectiveHook:
+
+    """
+    ObjectiveHook class to store the weighted loss of the given layers.
+
+    Args:
+    model: nn.Module
+        Pytorch model to generate deep dream images.
+
+    layer_names: List
+        List of layer names to store the loss.
+
+    device: torch.device
+        Device to run the model.
+
+    layer_weights: Optional[List]
+        List of weights for each layer. If not provided, all the layer weights are set to 1.
+
+    """
+
     def __init__(
         self,
         model: nn.Module,
@@ -37,13 +63,6 @@ class ObjectiveHook:
         self.layer_names = layer_names
         self.device = device
         self.model = model.to(self.device)
-
-        self.outputs = {name: None for name in self.layer_names}
-
-        self.forward_hooks = []
-        self.backward_hooks = []
-
-        self.forward_output = None
 
         self.losses = 0
 
@@ -57,11 +76,9 @@ class ObjectiveHook:
             if len(layer_weights) != len(self.layer_names):
 
                 m = "Number of layer weights should be equal to the number of layers."
-                logger.error( m)
+                logger.error(m)
 
-                raise ValueError(
-                    m
-                )
+                raise ValueError(m)
 
             self.layer_weights = layer_weights
 
@@ -104,11 +121,29 @@ class ObjectiveHook:
 
         return self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, type: Any, value: Any, traceback: Any):
 
         close_all_hooks(self.model)
 
-    def store_weighted_loss(self, name, output, weight):
+    def store_weighted_loss(self, name: str, output: torch.Tensor, weight: float):
+
+        """
+        
+        Store the weighted loss of the given layer.
+        
+        Args:
+        name: str
+            Layer name to store the loss.
+            
+        output: torch.Tensor
+            Output of the layer.
+            
+        weight: float
+            Weight to multiply with the output.
+            
+        """
+
+        output = output
 
         # use total variation loss
         if name == self.layer_names[-1]:
@@ -118,7 +153,6 @@ class ObjectiveHook:
 
 
 class DeepDream:
-
     """
     DeepDream class to generate deep dream images using the given model and layer name.
 
@@ -137,9 +171,11 @@ class DeepDream:
 
     """
 
-    def __init__(self,  img: torch.Tensor, hook_obj: ObjectiveHook, device: torch.device):
+    def __init__(
+        self, img: torch.Tensor, objective: ObjectiveHook, device: torch.device
+    ):
         self.img = img.to(device)
-        self.layer_hook = hook_obj
+        self.objective = objective
         self.device = device
 
     @classmethod
@@ -147,29 +183,55 @@ class DeepDream:
         cls,
         model: nn.Module,
         img: torch.Tensor,
-        layer_name: str,
+        layer_names: List,
         device: torch.device,
         layer_weight: Optional[float] = None,
     ) -> "DeepDream":
 
-        layer_hook = ObjectiveHook(
-            model, [layer_name], device, layer_weights=[layer_weight]
+        """
+        Create DeepDream object using the given model, image, layer name, and device.
+
+        Args:
+        model: nn.Module
+            Pytorch model to generate deep dream images.
+
+        img: torch.Tensor
+            Input image to generate deep dream images.
+
+        layer_names: List
+            List of layer names to store the loss.
+
+        device: torch.device
+            Device to run the model.
+
+        layer_weight: Optional[float]
+            Weight for the layer. If not provided, the weight is set to 1.
+
+        Returns:
+        DeepDream object
+
+        """
+
+        if isinstance(layer_names, str):
+            layer_names = [layer_names]
+
+        objective = ObjectiveHook(
+            model, layer_names, device, layer_weights=[layer_weight]
         )
 
-        return cls(img, layer_hook, device)
+        return cls(img, objective, device)
 
-    def deep_dream(self, iterations=20, lr=0.01):
+    def deep_dream(self, iterations=20, lr=0.01) -> torch.Tensor:
 
         image_displayer = HTMLImageDisplayer()
 
-        # self.optimizer = optim.Adam([self.img], lr=lr)
-        self.optimizer = optim.SGD([self.img], lr=lr)
+        self.optimizer = optim.Adam([self.img], lr=lr)
 
         self.img.requires_grad = True
 
-        for i in tqdm(range(iterations)):
+        for i in tqdm(range(iterations+1)):
 
-            model = self.layer_hook.model
+            model = self.objective.model
 
             model.zero_grad()
 
@@ -177,7 +239,7 @@ class DeepDream:
             model.eval()
             _ = model(self.img)
 
-            loss = -self.layer_hook.losses  # weighted sum of losses of all the layers
+            loss = -self.objective.losses  # weighted sum of losses of all the layers
 
             # calculate the gradient
             loss.backward()
@@ -190,23 +252,24 @@ class DeepDream:
 
             # clamp the pixel values between -1 and 1
             self.img.data = torch.clamp(self.img.data, -1, 1)
-            self.img.grad.data.zero_()
+            self.img = self.img.detach()  # Detach to free the graph
+            self.img.requires_grad = True  # Re-enable gradients
+            # self.img.grad.data.zero_()
 
-            self.layer_hook.losses = 0
+            self.objective.losses = 0
 
             if i % 5 == 0:
                 image_displayer.clear()
                 logger.debug(f"Img shape: {self.img.shape}")
-                image_displayer.update_image(self.img, base_title = f"Iteration: {i}")
-
+                image_displayer.update_image(self.img, base_title=f"Iteration: {i}")
 
         return self.img
 
     def close(self):
-        self.layer_hook.close()
+        self.objective.close()
 
     def __enter__(self):
         return self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, type: Any, value: Any, traceback: Any):
         self.close()
