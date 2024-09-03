@@ -229,6 +229,8 @@ class DeepDream:
 
         self.img.requires_grad = True
 
+        to_display_imgs = []
+
         for i in tqdm(range(iterations+1)):
 
             model = self.objective.model
@@ -258,10 +260,16 @@ class DeepDream:
 
             self.objective.losses = 0
 
+            to_display_imgs.append(self.img)
+
             if i % 5 == 0:
                 image_displayer.clear()
                 logger.debug(f"Img shape: {self.img.shape}")
-                image_displayer.update_image(self.img, base_title=f"Iteration: {i}")
+                image_displayer.display_grid(
+                    to_display_imgs, base_title=f"Iteration: {i}"
+                )
+
+                to_display_imgs = []
 
         return self.img
 
