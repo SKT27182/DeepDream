@@ -277,13 +277,14 @@ class DeepDream:
             # self.img.requires_grad = True  # Re-enable gradients
             self.img.grad.data.zero_()
 
+            logger.debug(f"Iteration: {i}, Loss: {loss.item()}")
+
             self.objective.losses = 0
 
             to_display_imgs.append(self.img.detach().cpu().clone())
 
             if (i+1) % display_interval == 0:
                 image_displayer.clear()
-                logger.debug(f"Img shape: {self.img.shape}")
 
                 # check if all the images are same or not
                 if len(set([str(img) for img in to_display_imgs])) == 1:
@@ -291,7 +292,9 @@ class DeepDream:
                     raise ValueError("All the images are same. Stopping the training.")
 
                 image_displayer.display_grid(
-                    to_display_imgs, base_title=f"Iteration: {i}"
+                    to_display_imgs,
+                    base_title=f"Iteration: {i}",
+                    save_path="dreemed_images",
                 )
 
                 create_animation(

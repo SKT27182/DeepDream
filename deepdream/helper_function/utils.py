@@ -1,5 +1,6 @@
 import base64
 from io import BytesIO
+import os
 import torch
 import torch.nn as nn
 from collections import OrderedDict
@@ -311,7 +312,6 @@ def create_animation(
         title: Title of the animation. Defaults to "".
     """
 
-
     fig = plt.figure()
     plt.axis("off")
     plt.title(title)
@@ -332,6 +332,11 @@ class HTMLImageDisplayer:
 
     def __init__(self):
         self.html = ""
+
+    def _save_img(self, img: Image.Image, file_path: str) -> None:
+        """Save an image to a file."""
+
+        img.save(f"{file_path}.png")
 
     def _convert_img(
         self, img: Union[np.ndarray, Image.Image, torch.Tensor]
@@ -360,10 +365,14 @@ class HTMLImageDisplayer:
         html: str,
         img: Union[np.ndarray, Image.Image, torch.Tensor],
         title: str,
-        height=400,
-        width=400,
+        save_path: Optional[str] = None,
+        height=200,
+        width=200,
     ) -> str:
         img = self._convert_img(img)
+
+        if save_path:
+            self._save_img(img, os.path.join(save_path, title))
 
         img_io = BytesIO()
         img.save(img_io, "PNG")
@@ -373,7 +382,9 @@ class HTMLImageDisplayer:
         html += f"""
             <div style="text-align:center; width:{width}px; margin-bottom: 20px;">
                 <h3 style="margin-bottom: 5px;">{title}</h3>
-                <img src="data:image/png;base64,{img_}" height={height} width={width}>
+                <a href="data:image/png;base64,{img_}" target="_blank">
+                    <img src="data:image/png;base64,{img_}" height={height} width={width}" loading="lazy">
+                </a>
             </div>
         """
 
@@ -383,8 +394,9 @@ class HTMLImageDisplayer:
         self,
         images: Union[List[torch.Tensor], torch.Tensor],
         base_title: str = "",
-        height=400,
-        width=400,
+        height=200,
+        width=200,
+        save_path: Optional[str] = None,
     ) -> None:
         """Display multiple image tensors."""
         if isinstance(images, torch.Tensor):
@@ -393,7 +405,7 @@ class HTMLImageDisplayer:
         for i, img in enumerate(images):
             logger.debug(f"Img shape: {img.shape}")
             title = f"{base_title}: {i}"
-            self.html += self._single_img_to_html(self.html, img, title, height, width)
+            self.html += self._single_img_to_html(self.html, img, title, save_path, height, width)
             self.html += f"<br><br>"
 
         if is_jupyter_notebook():
@@ -412,29 +424,53 @@ class HTMLImageDisplayer:
     def display_grid(
         self,
         images: Union[List[torch.Tensor], torch.Tensor],
+        captions: Optional[List[str]] = None,
         base_title: str = "",
-        cols: int = 3,
-        height=400,
-        width=400,
+        cols: int = 8,
+        height=200,
+        width=200,
+        padding_percentage=2,  # New parameter for relative padding
+        save_path: Optional[str] = None,
     ) -> None:
-        """Display images in a grid layout."""
+        """Display images in a grid layout with relative padding."""
         if isinstance(images, torch.Tensor):
             images = [images]
 
+        if captions is None:
+            captions = [f"{base_title}: {i}" for i in range(len(images))]
+
         rows = (len(images) + cols - 1) // cols  # Calculate number of rows needed
-        html = '<div style="display: flex; flex-wrap: wrap;">'
+        html = '<div style="display: flex; flex-wrap: wrap; justify-content: center;">'
 
         for i, img in enumerate(images):
-            title = f"{base_title}: {i}"
-            img_html = self._single_img_to_html("", img, title, height, width)
-            html += f'<div style="flex: 1 0 {100 // cols}%;">{img_html}</div>'
+            title = captions[i] if captions else f"{base_title}: {i}"
+            img_html = self._single_img_to_html("", img, title, save_path, height, width)
+            html += f'''
+                <div style="flex: 1 0 {100 // cols - padding_percentage}%;" class="responsive-img">
+                    {img_html}
+                </div>
+            '''
 
         html += "</div>"
         self.html += html
 
+        # Add CSS for responsive images with relative padding
+        self.html += f"""
+        <style>
+            .responsive-img {{
+                padding: 1px;
+            }}
+            @media screen and (max-width: 768px) {{
+                .responsive-img {{
+                    flex: 1 0 100%;
+                    max-width: 100%;
+                }}
+            }}
+        </style>
+        """
+
         if is_jupyter_notebook():
             display(HTML(self.html))
-
 
 class ImagePlotter:
     """A class to display images. It can be used to display images in a loop."""
