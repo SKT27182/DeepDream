@@ -16,6 +16,7 @@ from collections import OrderedDict
 from .helper_function.utils import (
     HTMLImageDisplayer,
     ImagePlotter,
+    create_animation,
     create_logger,
     close_all_hooks,
     display_img,
@@ -221,7 +222,25 @@ class DeepDream:
 
         return cls(img, objective, device)
 
-    def deep_dream(self, iterations=20, lr=0.01) -> torch.Tensor:
+    def deep_dream(self, iterations=20, lr=0.01, display_interval=5) -> torch.Tensor:
+
+        """
+        Generate deep dream images using the given model and layer name.
+
+        Args:
+        iterations: int
+            Number of iterations to generate deep dream images.
+
+        lr: float
+            Learning rate for the optimizer.
+
+        display_interval: int
+            Display the image after every display_interval iterations.  
+
+        Returns:
+        torch.Tensor: Deep dream image.
+
+        """
 
         image_displayer = HTMLImageDisplayer()
 
@@ -229,7 +248,7 @@ class DeepDream:
 
         self.img.requires_grad = True
 
-        to_display_imgs = []
+        to_display_imgs = [self.img.detach().cpu().clone()]
 
         for i in tqdm(range(iterations+1)):
 
@@ -260,13 +279,26 @@ class DeepDream:
 
             self.objective.losses = 0
 
-            to_display_imgs.append(self.img)
+            to_display_imgs.append(self.img.detach().cpu().clone())
 
-            if i % 5 == 0:
+            if (i+1) % display_interval == 0:
                 image_displayer.clear()
                 logger.debug(f"Img shape: {self.img.shape}")
+
+                # check if all the images are same or not
+                if len(set([str(img) for img in to_display_imgs])) == 1:
+                    logger.debug("All the images are same.")
+                    raise ValueError("All the images are same. Stopping the training.")
+
                 image_displayer.display_grid(
                     to_display_imgs, base_title=f"Iteration: {i}"
+                )
+
+                create_animation(
+                    to_display_imgs,
+                    f"deep_dream_{i}.gif",
+                    fps=2,
+                    title=f"Iteration: {i}",
                 )
 
                 to_display_imgs = []

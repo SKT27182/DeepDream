@@ -14,8 +14,10 @@ from IPython.display import clear_output, display, HTML
 from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 
 import wandb
+
 
 # Color mappings
 COLOUR_MAPPING = {
@@ -291,118 +293,38 @@ def is_jupyter_notebook() -> bool:
     return is_jupyter
 
 
-class HTMLImageDisplayer:
-    """A class to display images in a Jupyter notebook using HTML."""
+def create_animation(
+    images: List[torch.Tensor],
+    file_path: str,
+    fps: int = 10,
+    dpi: int = 100,
+    title: str = "",
+) -> None:
+    """
+    Create an animation from a list of images.
 
-    def __init__(self):
-        self.html = ""
+    Args:
+        images: List of image tensors.
+        file_path: Path to save the animation.
+        fps: Frames per second. Defaults to 10.
+        dpi: Dots per inch. Defaults to 100.
+        title: Title of the animation. Defaults to "".
+    """
 
-    def _convert_img(
-        self, img: Union[np.ndarray, Image.Image, torch.Tensor]
-    ) -> Image.Image:
-        """Convert an image tensor to a PIL image.
 
-        Parameters
-        ----------
-        img : torch.Tensor
-            Tensor representation of the image of shape (1, C, H, W).
+    fig = plt.figure()
+    plt.axis("off")
+    plt.title(title)
 
-        Returns
-        -------
-        Image.Image
-            PIL image.
-        """
+    ims = []
+    for img in images:
+        img = denormalize_img(img)
+        img = img.squeeze().permute(1, 2, 0).byte().numpy()
+        im = plt.imshow(img, animated=True)
+        ims.append([im])
 
-        logger.debug(f"Converting image to PIL image.")
-
-        if isinstance(img, (torch.Tensor, np.ndarray)):
-
-            logger.debug(f"Img shape in tensor: {img.shape}")
-
-            if isinstance(img, torch.Tensor):
-                img = denormalize_img(img)
-                logger.debug(f"Img shape in tensor after denormalize: {img.shape}")
-
-            if len(img.shape) == 4:
-
-                img = img.squeeze().detach().cpu().numpy()
-
-                img = np.transpose(img, (1, 2, 0))
-
-        if isinstance(img, Image.Image):
-            img = np.array(img)
-
-        return Image.fromarray(img)
-
-    def _single_img_to_html(
-        self,
-        html: str,
-        img: Union[np.ndarray, Image.Image, torch.Tensor],
-        title: str,
-        height=400,
-        width=400,
-    ) -> str:
-
-        img = self._convert_img(img)
-
-        # BytesIO object to display image in Jupyter notebook
-        img_io = BytesIO()
-        img.save(img_io, "PNG")
-        img_io.seek(0)
-        img_ = base64.b64encode(img_io.getvalue()).decode()
-
-        html += f"""
-            <div style="text-align:center; width:{width}px; margin-bottom: 20px;">
-                <h3 style="margin-bottom: 5px;">{title}</h3>
-                <img src="data:image/png;base64,{img_}" height={height} width={width}>
-            </div>
-        """
-
-        return html
-
-    def update_image(
-        self,
-        images: Union[List[torch.Tensor], torch.Tensor],
-        base_title: str = "",
-        height=400,
-        width=400,
-    ) -> None:
-        """Display multiple image tensors.
-
-        Parameters
-        ----------
-        images : Union[List[np.ndarray, Image.Image, torch.Tensor], str]
-            List of tensor representations of the images of shape (1, C, H, W).
-        """
-
-        if isinstance(images, torch.Tensor):
-            images = [images]
-
-        for i, img in enumerate(images):
-
-            logger.debug(f"Img shape: {img.shape}")
-            title = f"{base_title}: {i}"
-            self.html += self._single_img_to_html(self.html, img, title, height, width)
-            self.html += f"<br><br>"
-
-        if is_jupyter_notebook():
-            display(HTML(self.html))
-
-    def clear(self) -> None:
-        """Clear the displayed images."""
-        self.html = ""
-        clear_output(wait=True)
-
-    def save(self, file_path: str) -> None:
-        """Save the displayed images to a file.
-
-        Parameters
-        ----------
-        file_path : str
-            Path to save the file.
-        """
-        with open(file_path, "w") as f:
-            f.write(self.html)
+    ani = animation.ArtistAnimation(fig, ims, interval=1000 // fps, blit=True)
+    ani.save(file_path, writer="imagemagick", dpi=dpi)
 
 
 class HTMLImageDisplayer:
