@@ -4,6 +4,8 @@ import os
 import torch
 import torch.nn as nn
 from collections import OrderedDict
+import einops
+
 
 import logging
 from logging import Logger
@@ -40,8 +42,29 @@ COLOUR_MAPPING = {
     "UNDERLINE": "\033[4m",
 }
 
+LOG_LEVEL_MAPPING = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
 
 ############################################# Logger #######################################
+
+def set_log_level_to_mine_logger(level: int| str) -> None:
+    """Set the log level of the mine logger.
+
+    Args:
+        level: Logging level.
+    """
+    all_loggers = [logging.getLogger(name) for name in logging.root.manager.loggerDict]
+
+    level = LOG_LEVEL_MAPPING[level] if isinstance(level, str) else level
+
+    for logger in all_loggers:
+        if hasattr(logger, 'mine'):
+            logger.setLevel(level)
 
 
 def add_logging_level(
@@ -170,6 +193,10 @@ def create_logger(
     console_handler.setFormatter(custom_formatter)
     logger.addHandler(console_handler)
 
+    logger.mine = True
+
+    set_log_level_to_mine_logger(level_int)
+
     return logger
 
 
@@ -200,33 +227,37 @@ def img_to_tensor(file_path: str) -> torch.Tensor:
     Returns:
         Tensor representation of the image of shape (1, C, H, W).
     """
+    # print(logger.level)
+
+    logger.debug(f"Converting image to tensor: {file_path}")
     img = plt.imread(file_path)  # (H, W, C)
-    # Normalize the image between -1 and 1
-    img = np.moveaxis(img, -1, 0)  # (C, H, W)
+    # add batch =1 axis and move channel axis to the first
+    img = einops.rearrange(img, "h w c -> 1 c h w")
     img = torch.tensor(img, dtype=torch.float32)  # (C, H, W)
-    img = img.unsqueeze(0)  # (B, C, H, W)
-    img = normalize_img(img)
+    # img = img.unsqueeze(0)  # (B, C, H, W)
+    img = normalize_img(img)   # -1 to 1
     return img
 
 
 def tensor_to_img(tensor: torch.Tensor, file_path: str) -> None:
     """
-    Convert a tensor to an image and save it.
+    Denormalize and save an image tensor to a file.
 
     Args:
         tensor: Tensor representation of the image of shape (1, C, H, W).
         file_path: Path to save the image file.
     """
-    from PIL import Image
 
-    img = tensor.squeeze().permute(1, 2, 0).byte().numpy()
+    # img = tensor.squeeze().permute(1, 2, 0).byte().numpy()
+    img = einops.rearrange(tensor, "1 c h w -> h w c").byte().numpy()
+    img = denormalize_img(img)  # 0 to 255
     img = Image.fromarray(img)
     img.save(file_path)
 
 
 def normalize_img(img: torch.Tensor) -> torch.Tensor:
     """
-    Normalize an image tensor.
+    Normalize an image tensor between -1 and 1.
 
     Args:
         img: Tensor representation of the image of shape (1, C, H, W).
@@ -239,7 +270,7 @@ def normalize_img(img: torch.Tensor) -> torch.Tensor:
 
 def denormalize_img(img: torch.Tensor) -> torch.Tensor:
     """
-    Normalize an image tensor.
+    Normalize an image tensor between 0 and 255.
 
     Args:
         img: Tensor representation of the image of shape (1, C, H, W).
@@ -262,7 +293,8 @@ def display_img(img: torch.Tensor) -> None:
 
     img = denormalize_img(img)
 
-    img = img.squeeze().permute(1, 2, 0).byte().numpy()
+    # img = img.squeeze().permute(1, 2, 0).byte().numpy()
+    img = einops.rearrange(img, "1 c h w -> h w c").byte().numpy()
     clear_output(wait=True)
     display(Image.fromarray(img))
 
@@ -295,31 +327,39 @@ def is_jupyter_notebook() -> bool:
 
 
 def create_animation(
-    images: List[torch.Tensor],
+    images: torch.Tensor,
     file_path: str,
     fps: int = 10,
     dpi: int = 100,
     title: str = "",
+    denormalize: bool = True,
 ) -> None:
     """
     Create an animation from a list of images.
 
     Args:
-        images: List of image tensors.
+        images: tensor representation of the images of shape (B, C, H, W).
         file_path: Path to save the animation.
         fps: Frames per second. Defaults to 10.
         dpi: Dots per inch. Defaults to 100.
         title: Title of the animation. Defaults to "".
+        denormalize: Whether to denormalize the images. Defaults to True. (-1 to 1 -> 0 to 255)
     """
 
     fig = plt.figure()
     plt.axis("off")
     plt.title(title)
 
+    # images is a tensor of shape (B, C, H, W)
+
+    # images = denormalize_img(images) if denormalize else images
+
+    # images = einops.rearrange(images, "b c h w -> b h w c").numpy()
+
     ims = []
     for img in images:
-        img = denormalize_img(img)
-        img = img.squeeze().permute(1, 2, 0).byte().numpy()
+        im = HTMLImageDisplayer._convert_img(img, denormalize)
+
         im = plt.imshow(img, animated=True)
         ims.append([im])
 
@@ -338,22 +378,34 @@ class HTMLImageDisplayer:
 
         img.save(f"{file_path}.png")
 
+    @staticmethod
     def _convert_img(
-        self, img: Union[np.ndarray, Image.Image, torch.Tensor]
+         img: Union[np.ndarray, Image.Image, torch.Tensor], denormalize: bool = True
     ) -> Image.Image:
-        """Convert an image tensor to a PIL image."""
+        """Convert an image tensor to a PIL image.
+        
+        Args:
+            img: Image tensor of shape (H, W, C) 
+            denormalize: Whether to denormalize the image. Defaults to True.
+
+        """
         logger.debug(f"Converting image to PIL image.")
 
         if isinstance(img, (torch.Tensor, np.ndarray)):
-            logger.debug(f"Img shape in tensor: {img.shape}")
+            logger.debug(f"Image is a tensor or numpy array.")
+            img = denormalize_img(img) if denormalize else img
+            img = img.detach().cpu().numpy()
+            logger.debug(f"Img shape after denormalize: {img.shape}")
 
-            if isinstance(img, torch.Tensor):
-                img = denormalize_img(img)
-                logger.debug(f"Img shape in tensor after denormalize: {img.shape}")
+            # if isinstance(img, torch.Tensor):
+            #     img = denormalize_img(img)
+            #     logger.debug(f"Img shape in tensor after denormalize: {img.shape}")
 
             if len(img.shape) == 4:
-                img = img.squeeze().detach().cpu().numpy()
-                img = np.transpose(img, (1, 2, 0))
+                logger.error(f"Image tensor has more than 3 dimensions.")
+                raise ValueError("Image tensor has more than 3 dimensions.")
+                # img = img.squeeze().detach().cpu().numpy()
+                # img = np.transpose(img, (1, 2, 0))
 
         if isinstance(img, Image.Image):
             img = np.array(img)
@@ -368,8 +420,24 @@ class HTMLImageDisplayer:
         save_path: Optional[str] = None,
         height=200,
         width=200,
+        denormalize: bool = True,
     ) -> str:
-        img = self._convert_img(img)
+
+        """
+        Convert a single image to HTML.
+
+        Args:
+            html: HTML string.
+            img: Image tensor of shape (H, W, C).
+            title: Title of the image.
+            save_path: Path to save the image.
+            height: Height of the image.
+            width: Width of the image.
+            denormalize: Whether to denormalize the image. Defaults to True.
+        
+        """
+
+        img = self._convert_img(img, denormalize)
 
         if save_path:
             self._save_img(img, os.path.join(save_path, title))
@@ -397,15 +465,36 @@ class HTMLImageDisplayer:
         height=200,
         width=200,
         save_path: Optional[str] = None,
+        denormalize: bool = True,
     ) -> None:
-        """Display multiple image tensors."""
-        if isinstance(images, torch.Tensor):
-            images = [images]
+        """Display multiple image tensors.
+        
+        Args:
+            images: List of image tensors of shape (B, C, H, W) or List[(H, W, C)].
+            base_title: Base title for the images.
+            height: Height of the image.
+            width: Width of the image.
+            save_path: Path to save the images
+            denormalize: Whether to denormalize the images. Defaults to True.
+        """
+        # if isinstance(images, torch.Tensor):
+        #     images = [images]
 
-        for i, img in enumerate(images):
-            logger.debug(f"Img shape: {img.shape}")
+        # check if images is a tensor and have 4 dimensions
+        if isinstance(images, torch.Tensor) and len(images.shape) == 4:
+            images = einops.rearrange(images, "b c h w -> b h w c")
+
+        if isinstance(images, List) and len(images[0].shape) == 4:
+            m = "Images is a list of tensors with 4 dimensions. Please provide a list of 3-d tensors."
+            logger.error(m)
+            raise ValueError(m)
+
+        for i, img in enumerate(images):  # if 4-d tensor, loop through the batch
+            logger.debug(f"Displaying image {i} of shape {img.shape}")
             title = f"{base_title}: {i}"
-            self.html += self._single_img_to_html(self.html, img, title, save_path, height, width)
+            self.html += self._single_img_to_html(
+                self.html, img, title, save_path, height, width, denormalize=denormalize
+            )
             self.html += f"<br><br>"
 
         if is_jupyter_notebook():
@@ -429,10 +518,29 @@ class HTMLImageDisplayer:
         cols: int = 8,
         height=200,
         width=200,
-        padding_percentage=2,  # New parameter for relative padding
         save_path: Optional[str] = None,
+        denormalize: bool = False,
     ) -> None:
-        """Display images in a grid layout with relative padding."""
+        """Display images in a grid layout with relative padding.
+        
+        Args:
+            images: List of image tensors of shape (B, C, H, W) or List[(H, W, C)].
+            
+            captions: List of captions for the images. Defaults to None.
+            
+            base_title: Base title for the images.
+            
+            cols: Number of columns in the grid. Defaults to 8.
+            
+            height: Height of the image. Defaults to 200.
+            
+            width: Width of the image. Defaults to 200.
+            
+            save_path: Path to save the images. Defaults to None.
+            
+            denormalize: Whether to denormalize the images. Defaults to False.
+            
+        """
         if isinstance(images, torch.Tensor):
             images = [images]
 
@@ -444,9 +552,9 @@ class HTMLImageDisplayer:
 
         for i, img in enumerate(images):
             title = captions[i] if captions else f"{base_title}: {i}"
-            img_html = self._single_img_to_html("", img, title, save_path, height, width)
+            img_html = self._single_img_to_html("", img, title, save_path, height, width, denormalize=denormalize)
             html += f'''
-                <div style="flex: 1 0 {100 // cols - padding_percentage}%;" class="responsive-img">
+                <div style="flex: 1 0 {100 // cols - 2}%;" class="responsive-img">
                     {img_html}
                 </div>
             '''
@@ -455,19 +563,19 @@ class HTMLImageDisplayer:
         self.html += html
 
         # Add CSS for responsive images with relative padding
-        self.html += f"""
-        <style>
-            .responsive-img {{
-                padding: 1px;
-            }}
-            @media screen and (max-width: 768px) {{
-                .responsive-img {{
-                    flex: 1 0 100%;
-                    max-width: 100%;
-                }}
-            }}
-        </style>
-        """
+        # self.html += f"""
+        # <style>
+        #     .responsive-img {{
+        #         padding: 1px;
+        #     }}
+        #     @media screen and (max-width: 768px) {{
+        #         .responsive-img {{
+        #             flex: 1 0 100%;
+        #             max-width: 100%;
+        #         }}
+        #     }}
+        # </style>
+        # """
 
         if is_jupyter_notebook():
             display(HTML(self.html))
@@ -508,9 +616,10 @@ class ImagePlotter:
         # convert tensor to numpy array
         if isinstance(image, torch.Tensor):
             image = denormalize_img(image)
-            image = image.squeeze().detach().cpu().numpy()
-            # permute the channels to the last dimension
-            image = np.transpose(image, (1, 2, 0))
+            image = einops.rearrange(image, "1 c h w -> h w c").detach().cpu().numpy()
+            # image = image.squeeze().detach().cpu().numpy()
+            # # permute the channels to the last dimension
+            # image = np.transpose(image, (1, 2, 0))
 
         channels = image.shape[-1]
         if channels == 1 and self.cmap not in ["gray", "Greys"]:

@@ -1,3 +1,4 @@
+import einops
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,6 +20,7 @@ from .helper_function.utils import (
     create_animation,
     create_logger,
     close_all_hooks,
+    denormalize_img,
     display_img,
     create_wandb_logger,
 )
@@ -248,9 +250,21 @@ class DeepDream:
 
         self.img.requires_grad = True
 
-        to_display_imgs = [self.img.detach().cpu().clone()]
+        # store the images to display in the tensor with batch dimension
 
-        for i in tqdm(range(iterations+1)):
+        to_display_imgs = []
+
+        to_display_imgs.append(
+            denormalize_img(
+                einops.reduce(
+                    self.img.detach().cpu().clone(), "b c h w -> h w c", "mean"
+                )
+            )
+        )
+
+        for i in range(iterations+1):
+
+            logger.info(f"Iteration: {i+1}")
 
             model = self.objective.model
 
@@ -281,7 +295,16 @@ class DeepDream:
 
             self.objective.losses = 0
 
-            to_display_imgs.append(self.img.detach().cpu().clone())
+            logger.debug(f"Input Image shape: {self.img.shape}")
+
+            to_display_imgs.append(
+                denormalize_img(
+                    einops.reduce
+                    (
+                    self.img.detach().cpu().clone(), "b c h w -> h w c", "mean"
+                    )
+                )
+            )
 
             if (i+1) % display_interval == 0:
                 image_displayer.clear()
@@ -295,6 +318,7 @@ class DeepDream:
                     to_display_imgs,
                     base_title=f"Iteration: {i}",
                     save_path="dreemed_images",
+                    denormalize=False,
                 )
 
                 create_animation(
@@ -302,6 +326,7 @@ class DeepDream:
                     f"deep_dream_{i}.gif",
                     fps=2,
                     title=f"Iteration: {i}",
+                    denormalize=False,
                 )
 
                 to_display_imgs = []
