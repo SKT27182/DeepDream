@@ -253,9 +253,9 @@ class DeepDream:
         # store the images to display in the tensor with batch dimension
 
         if isinstance(display_interval, int):
-            to_display_imgs = []
+            self.to_display_imgs = []
 
-            to_display_imgs.append(
+            self.to_display_imgs.append(
                 denormalize_img(
                     einops.reduce(
                         self.img.detach().cpu().clone(), "b c h w -> h w c", "mean"
@@ -299,11 +299,10 @@ class DeepDream:
             logger.debug(f"Input Image shape: {self.img.shape}")
 
             if isinstance(display_interval, int):
-                to_display_imgs.append(
+                self.to_display_imgs.append(
                     denormalize_img(
-                        einops.reduce
-                        (
-                        self.img.detach().cpu().clone(), "b c h w -> h w c", "mean"
+                        einops.reduce(
+                            self.img.detach().cpu().clone(), "b c h w -> h w c", "mean"
                         )
                     )
                 )
@@ -313,12 +312,12 @@ class DeepDream:
                     image_displayer.clear()
 
                     # check if all the images are same or not
-                    if len(set([str(img) for img in to_display_imgs])) == 1:
+                    if len(set([str(img) for img in self.to_display_imgs])) == 1:
                         logger.debug("All the images are same.")
                         raise ValueError("All the images are same. Stopping the training.")
 
                     image_displayer.display_grid(
-                        to_display_imgs,
+                        self.to_display_imgs,
                         base_title=f"Iteration: {i}",
                         save_path="dreamed_images",
                         denormalize=False,
@@ -332,7 +331,7 @@ class DeepDream:
                     #     denormalize=False,
                     # )
 
-                    to_display_imgs = []
+                    self.to_display_imgs = []
 
         return self.img
 

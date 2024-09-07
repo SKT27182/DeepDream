@@ -113,7 +113,7 @@ class CustomFormatter(logging.Formatter):
 
         # Create the log message without color first
         custom_format = (
-            "%(asctime)s - %(process)d - %(name)s - %(levelname)s - %(message)s"
+            "%(asctime)s - %(process)d - %(name)s:%(lineno)d - %(levelname)s - %(message)s"
         )
         formatter = logging.Formatter(custom_format, datefmt="%Y-%m-%d %H:%M:%S")
         log_message = formatter.format(formatted_record)
@@ -217,7 +217,7 @@ def close_all_hooks(model: nn.Module):
             module.backward_hooks = OrderedDict()
 
 
-def img_to_tensor(file_path: str) -> torch.Tensor:
+def img_to_tensor(file_path: str, normalize=True) -> torch.Tensor:
     """
     Convert an image to a tensor.
 
@@ -233,9 +233,8 @@ def img_to_tensor(file_path: str) -> torch.Tensor:
     img = plt.imread(file_path)  # (H, W, C)
     # add batch =1 axis and move channel axis to the first
     img = einops.rearrange(img, "h w c -> 1 c h w")
-    img = torch.tensor(img, dtype=torch.float32)  # (C, H, W)
-    # img = img.unsqueeze(0)  # (B, C, H, W)
-    img = normalize_img(img)   # -1 to 1
+    img = torch.tensor(img, dtype=torch.float32)  # (1, C, H, W)
+    img = normalize_img(img) if normalize else img # -1 to 1
     return img
 
 
@@ -257,7 +256,7 @@ def tensor_to_img(tensor: torch.Tensor, file_path: str) -> None:
 
 def normalize_img(img: torch.Tensor) -> torch.Tensor:
     """
-    Normalize an image tensor between -1 and 1.
+    Normalize an image tensor between -1 and 1, except the input is between 0 and 255.
 
     Args:
         img: Tensor representation of the image of shape (1, C, H, W).
@@ -265,12 +264,18 @@ def normalize_img(img: torch.Tensor) -> torch.Tensor:
     Returns:
         Normalized image tensor.
     """
-    return 2 * (img.float() / 255.0) - 1.0
+    logger.debug(f"Normalizing image tensor, min: {img.min()}, max: {img.max()}")
+
+    img = 2 * (img.float() / 255.0) - 1.0
+
+    logger.debug(f"Normalized image tensor, min: {img.min()}, max: {img.max()}")
+
+    return img
 
 
 def denormalize_img(img: torch.Tensor) -> torch.Tensor:
     """
-    Normalize an image tensor between 0 and 255.
+    Normalize an image tensor between 0 and 255 except the input is between -1 and 1.
 
     Args:
         img: Tensor representation of the image of shape (1, C, H, W).
@@ -279,8 +284,18 @@ def denormalize_img(img: torch.Tensor) -> torch.Tensor:
         Normalized image tensor.
     """
 
-    img = 255 * (img + 1.0) / 2.0
-    return img.to(torch.uint8)
+    logger.debug(f"Denormalizing image tensor, min: {img.min()}, max: {img.max()}")
+
+    if img.min() < 0.0:
+        img = 255 * (img + 1.0) / 2.0
+    else:
+        img = 255 * img
+
+    img = img.to(torch.uint8)
+
+    logger.debug(f"Denormalized image tensor, min: {img.min()}, max: {img.max()}")
+
+    return img
 
 
 def display_img(img: torch.Tensor) -> None:
@@ -327,7 +342,7 @@ def is_jupyter_notebook() -> bool:
 
 
 def create_animation(
-    images: torch.Tensor,
+    images: Union[List[torch.Tensor], torch.Tensor],
     file_path: str,
     fps: int = 10,
     dpi: int = 100,
@@ -338,7 +353,7 @@ def create_animation(
     Create an animation from a list of images.
 
     Args:
-        images: tensor representation of the images of shape (B, C, H, W).
+        images: List of image tensors of shape (B, C, H, W) or List[(H, W, C)].
         file_path: Path to save the animation.
         fps: Frames per second. Defaults to 10.
         dpi: Dots per inch. Defaults to 100.
@@ -346,15 +361,13 @@ def create_animation(
         denormalize: Whether to denormalize the images. Defaults to True. (-1 to 1 -> 0 to 255)
     """
 
-    fig = plt.figure()
+    fig = plt.figure( figsize=(8, 8), dpi = 150)
     plt.axis("off")
     plt.title(title)
 
-    # images is a tensor of shape (B, C, H, W)
-
-    # images = denormalize_img(images) if denormalize else images
-
-    # images = einops.rearrange(images, "b c h w -> b h w c").numpy()
+    # check if images is a tensor and have 4 dimensions
+    if isinstance(images, torch.Tensor) and len(images.shape) == 4:
+        images = einops.rearrange(images, "b c h w -> b h w c")
 
     ims = []
     for img in images:
@@ -375,7 +388,6 @@ class HTMLImageDisplayer:
 
     def _save_img(self, img: Image.Image, file_path: str) -> None:
         """Save an image to a file."""
-
         img.save(f"{file_path}.png")
 
     @staticmethod
@@ -408,7 +420,7 @@ class HTMLImageDisplayer:
                 # img = np.transpose(img, (1, 2, 0))
 
         if isinstance(img, Image.Image):
-            img = np.array(img)
+            return img
 
         return Image.fromarray(img)
 
@@ -486,7 +498,9 @@ class HTMLImageDisplayer:
 
         # check if images is a tensor and have 4 dimensions
         if isinstance(images, torch.Tensor) and len(images.shape) == 4:
+            logger.debug(f"Images is a tensor with 4 dimensions of shape {images.shape}")
             images = einops.rearrange(images, "b c h w -> b h w c")
+            logger.debug(f"Images shape after rearrange: {images.shape}")
 
         if isinstance(images, List) and len(images[0].shape) == 4:
             m = "Images is a list of tensors with 4 dimensions. Please provide a list of 3-d tensors."
@@ -553,6 +567,10 @@ class HTMLImageDisplayer:
 
         rows = (len(images) + cols - 1) // cols  # Calculate number of rows needed
         html = '<div style="display: flex; flex-wrap: wrap; justify-content: center;">'
+
+        # check if images is a tensor and have 4 dimensions
+        if isinstance(images, torch.Tensor) and len(images.shape) == 4:
+            images = einops.rearrange(images, "b c h w -> b h w c")
 
         for i, img in enumerate(images):
             title = captions[i] if captions else f"{base_title}: {i}"
