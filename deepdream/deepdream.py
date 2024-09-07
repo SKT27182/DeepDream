@@ -12,8 +12,6 @@ from typing import List, Tuple, Dict, Any, Union, Optional
 from IPython.display import clear_output, display
 from tqdm.notebook import tqdm
 
-from collections import OrderedDict
-
 from .helper_function.utils import (
     HTMLImageDisplayer,
     ImagePlotter,

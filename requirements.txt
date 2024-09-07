@@ -1,0 +1,6 @@
+torch==2.0.1
+numpy==1.23.5
+torchvision==0.15.2
+efficientnet-pytorch==0.7.1
+einops==0.8.0
+ipython==8.8.0
