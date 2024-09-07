@@ -440,6 +440,10 @@ class HTMLImageDisplayer:
         img = self._convert_img(img, denormalize)
 
         if save_path:
+            # check if the save path exists
+            if not os.path.exists(save_path):
+                logger.debug(f"Creating directory: {save_path}")
+                os.makedirs(save_path)
             self._save_img(img, os.path.join(save_path, title))
 
         img_io = BytesIO()
